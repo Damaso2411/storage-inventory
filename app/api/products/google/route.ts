@@ -16,7 +16,9 @@ export async function GET(req:NextRequest){
   const data=await response.json();
   if(data.error)return NextResponse.json({configured:true,results:[],searchUrl,note:"SerpAPI: "+String(data.error).slice(0,180)});
   const organic=Array.isArray(data.organic_results)?data.organic_results:[];
-  const results:Result[]=organic.slice(0,8).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||""})).filter((r:Result)=>/^https:\/\//.test(r.url));
-  return NextResponse.json({configured:true,results,searchUrl,note:results.length?"Resultados de Google vía SerpAPI. Comprueba que el producto corresponda al código antes de confirmar.":"Google no devolvió resultados para este código."});
+  const excluded=/(?:orcid\.org|nii\.ac\.jp|researchgate\.net|scholar\.google|trademarks\.justia\.com|uspto\.gov|linkedin\.com|pubmed\.ncbi|wikipedia\.org|academia\.edu|patents\.google)/i;
+  const commercial=/(?:amazon\.|ebay\.|walmart\.|target\.|homedepot\.|lowes\.|bestbuy\.|costco\.|walgreens\.|cvs\.|etsy\.|mercari\.|shopify\.|aliexpress\.|alibaba\.|barcode|upc|product|item|buy|shop|store|price|pack|oz\b|ml\b|vicks|vap[o]?stick)/i;
+  const results:Result[]=organic.slice(0,15).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||""})).filter((r:Result)=>/^https:\/\//.test(r.url)&&!excluded.test(r.url)&&commercial.test([r.title,r.snippet,r.url].join(" ")));
+  return NextResponse.json({configured:true,results,searchUrl,note:results.length?"Resultados de Google vía SerpAPI. Comprueba que el producto corresponda al código antes de confirmar.":"No se encontraron coincidencias comerciales confiables para este número. No se mostrarán personas, registros académicos ni marcas como productos."});
  }catch{return NextResponse.json({configured:true,results:[],searchUrl,note:"La búsqueda automática no respondió. Intenta nuevamente."});}
 }
