@@ -47,7 +47,7 @@ export default function ScanDemo(){
          const results=await detector.detect(element);
          if(results.length&&active.current){handleScan(results[0].rawValue);return;}
         }
-       }catch(e){failures++;if(failures===5){usingNative=false;active.current=false;void start();return;}}
+       }catch(e){failures++;if(failures===5){setStatus("El lector nativo no pudo procesar la cámara. Pulsa Reiniciar cámara para intentar de nuevo.");active.current=false;return;}}
        finally{scanBusy.current=false;}
        if(active.current)nativeTimer.current=setTimeout(()=>void poll(),180);
       };
