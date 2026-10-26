@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 export const runtime="nodejs";
 export async function POST(request:NextRequest){
- const key=process.env.OPENAI_API_KEY;
+ const key=(process.env.OPENAI_API_KEY||process.env.openai_api_key);
  if(!key)return NextResponse.json({error:"Identificación por IA pendiente de configurar: falta OPENAI_API_KEY en Vercel."},{status:503});
  try{
  const body=await request.json();const dataUrl=body?.image;
