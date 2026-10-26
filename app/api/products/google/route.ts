@@ -31,7 +31,7 @@ export async function GET(req:NextRequest){
   const results:Result[]=candidates.slice(0,25).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string;price?:string;sponsored?:boolean})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||"",price:r.price||"",sponsored:Boolean(r.sponsored)})).filter((r:Result)=>{
    if(!/^https:\/\//.test(r.url)||excluded.test(r.url)||!latin.test(r.title))return false;
    const content=r.title+" "+r.snippet;
-   return visualQuery?(retailer.test(r.url)||r.sponsored||productWords.test(content)):content.includes(code)&&(retailer.test(r.url)||productWords.test(content));
+   return visualQuery?(retailer.test(r.url)||r.sponsored||productWords.test(content)):(content.includes(code)||retailer.test(r.url)||r.sponsored||productWords.test(content));
   });
   const productInfo=knowledge&&typeof knowledge.title==="string"&&knowledge.title.toLowerCase().includes(code)?{title:knowledge.title,description:knowledge.description||""}:null;
   return NextResponse.json({configured:true,results,productInfo,searchUrl,visualSuggestion:visualQuery,note:results.length?visualQuery?"Sugerencias comerciales de Google basadas en la fotografía, no verificadas contra el código.":"Posibles páginas de productos. Confirma el código, la marca y el envase.":visualQuery?"No se encontraron productos para la descripción visual.":"No hay coincidencias comerciales verificables para el código; se puede intentar una búsqueda visual."});
