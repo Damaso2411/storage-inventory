@@ -1,0 +1,64 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+
+model Auction {
+  id String @id @default(cuid())
+  title String
+  facility String?
+  purchasedAt DateTime
+  purchaseCost Decimal @db.Decimal(12,2)
+  createdAt DateTime @default(now())
+  expenses AuctionExpense[]
+  items Item[]
+}
+model AuctionExpense {
+  id String @id @default(cuid())
+  auctionId String
+  auction Auction @relation(fields:[auctionId],references:[id],onDelete:Cascade)
+  description String
+  amount Decimal @db.Decimal(12,2)
+  createdAt DateTime @default(now())
+}
+model Item {
+  id String @id @default(cuid())
+  auctionId String
+  auction Auction @relation(fields:[auctionId],references:[id],onDelete:Restrict)
+  sku String @unique
+  barcode String?
+  title String
+  description String?
+  condition String @default("UNTESTED")
+  status String @default("UNREVIEWED")
+  location String?
+  askingPrice Decimal? @db.Decimal(12,2)
+  createdAt DateTime @default(now())
+  photos ItemPhoto[]
+  sales SaleItem[]
+  @@index([auctionId])
+  @@index([barcode])
+}
+model ItemPhoto {
+  id String @id @default(cuid())
+  itemId String
+  item Item @relation(fields:[itemId],references:[id],onDelete:Cascade)
+  storageKey String
+  createdAt DateTime @default(now())
+}
+model Sale {
+  id String @id @default(cuid())
+  channel String
+  soldAt DateTime @default(now())
+  grossAmount Decimal @db.Decimal(12,2)
+  fees Decimal @default(0) @db.Decimal(12,2)
+  shippingCost Decimal @default(0) @db.Decimal(12,2)
+  items SaleItem[]
+}
+model SaleItem {
+  id String @id @default(cuid())
+  saleId String
+  itemId String
+  sale Sale @relation(fields:[saleId],references:[id],onDelete:Cascade)
+  item Item @relation(fields:[itemId],references:[id],onDelete:Restrict)
+  allocatedAmount Decimal @db.Decimal(12,2)
+  @@unique([saleId,itemId])
+}
