@@ -27,40 +27,18 @@ export default function ScanDemo(){
    const track=s.getVideoTracks()[0];
    const caps=track?.getCapabilities?.() as MediaTrackCapabilities & {torch?:boolean};
    setTorchSupported(Boolean(caps?.torch));active.current=true;scanBusy.current=false;
-   const formats=["ean_13","ean_8","upc_a","upc_e","code_128","code_39","code_93","itf","qr_code"];
-   const Native=(window as unknown as {BarcodeDetector?:{new(options:{formats:string[]}):{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string;format:string}>>};getSupportedFormats?:()=>Promise<string[]>}}).BarcodeDetector;
-   let usingNative=false;
-   if(Native){
-    try{
-     const supported=typeof Native.getSupportedFormats==="function"?await Native.getSupportedFormats():formats;
-     const available=formats.filter(f=>supported.includes(f));
-     if(available.length){
-      const detector=new Native({formats:available});
-      usingNative=true;
-      setStatus("Cámara activa. Acerca el código de barras al centro y mantén el teléfono estable.");
-      let failures=0;
-      const poll=async()=>{
-       if(!active.current||scanBusy.current)return;
-       scanBusy.current=true;
-       try{
-        if(element.readyState>=2){
-         const results=await detector.detect(element);
-         if(results.length&&active.current){handleScan(results[0].rawValue);return;}
-        }
-       }catch(e){failures++;if(failures===5){setStatus("El lector nativo no pudo procesar la cámara. Pulsa Reiniciar cámara para intentar de nuevo.");active.current=false;return;}}
-       finally{scanBusy.current=false;}
-       if(active.current)nativeTimer.current=setTimeout(()=>void poll(),180);
-      };
-      void poll();
-     }
-    }catch{usingNative=false;}
-   }
-   if(!usingNative){
-    const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:100,delayBetweenScanSuccess:350});
-    setStatus("Escáner ZXing activo. Enfoca el código completo con buena luz.");
-    const controls=await reader.decodeFromStream(s,element,(result)=>{if(result&&active.current)handleScan(result.getText());});
-    scannerControls.current=controls;if(!active.current)controls.stop();
-   }
+   // ZXing decodes UPC/EAN directly from the live iPhone camera.
+   // Prefer it over Safari's inconsistent BarcodeDetector implementation.
+   const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:600});
+   setStatus("Lector UPC/EAN activo. Centra todas las barras en pantalla y mantén el teléfono quieto.");
+   const controls=await reader.decodeFromStream(s,element,(result)=>{
+    if(result&&active.current&&!scanBusy.current){
+     scanBusy.current=true;
+     handleScan(result.getText());
+    }
+   });
+   scannerControls.current=controls;
+   if(!active.current)controls.stop();
   }catch(e){
    const msg=e instanceof Error?e.message:"Error desconocido";
    stop();setCameraError(true);setStatus("Error de cámara: "+msg+". Comprueba permisos y vuelve a intentar.");
