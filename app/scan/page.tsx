@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from "react";
 import {BrowserMultiFormatReader} from "@zxing/browser";
 import {BarcodeFormat,DecodeHintType} from "@zxing/library";
 export default function ScanDemo(){
- const video=useRef<HTMLVideoElement>(null),stream=useRef<MediaStream|null>(null),scannerControls=useRef<{stop:()=>void}|null>(null),active=useRef(false),detailsAnchor=useRef<HTMLDivElement>(null),cameraAnchor=useRef<HTMLDivElement>(null),nativeTimer=useRef<ReturnType<typeof setTimeout>|null>(null),scanBusy=useRef(false),startSequence=useRef(0),lastFrame=useRef<string>("");
+ const video=useRef<HTMLVideoElement>(null),stream=useRef<MediaStream|null>(null),scannerControls=useRef<{stop:()=>void}|null>(null),active=useRef(false),detailsAnchor=useRef<HTMLDivElement>(null),cameraAnchor=useRef<HTMLDivElement>(null),nativeTimer=useRef<ReturnType<typeof setTimeout>|null>(null),scanBusy=useRef(false),startSequence=useRef(0),ocrTimer=useRef<ReturnType<typeof setTimeout>|null>(null),ocrBusy=useRef(false),ocrLast=useRef(""),ocrRepeat=useRef(0),lastFrame=useRef<string>("");
  const [scanDebug,setScanDebug]=useState("Esperando cámara"),[condition,setCondition]=useState("used"),[shipping,setShipping]=useState("6.50"),[purchaseCost,setPurchaseCost]=useState("0"),[marketBusy,setMarketBusy]=useState(false),[market,setMarket]=useState<any>(null);
  const [torch,setTorch]=useState(false),[torchSupported,setTorchSupported]=useState(false),[cameraError,setCameraError]=useState(false);
  const [mode,setMode]=useState<"barcode"|"qr"|"photo">("barcode"),[photo,setPhoto]=useState(""),[details,setDetails]=useState(""),[photoBusy,setPhotoBusy]=useState(false);
@@ -13,7 +13,7 @@ export default function ScanDemo(){
  async function lookup(raw:string){const value=raw.trim();if(!/^[0-9]{8,14}$/.test(value)){setStatus("Código inválido: escribe entre 8 y 14 dígitos.");return;}setCode(value);const frame=lastFrame.current;lastFrame.current="";stop();setReview({code:value,loading:true,catalog:null,google:null});setStatus("Consultando catálogos y Google...");setLookupLinks([{label:"Buscar en Google",url:"https://www.google.com/search?q="+encodeURIComponent(value)},{label:"Buscar en eBay",url:"https://www.ebay.com/sch/i.html?_nkw="+encodeURIComponent(value)}]);const [catalog,google]=await Promise.all([fetch("/api/products/lookup?code="+encodeURIComponent(value)).then(r=>r.json()).catch(()=>({found:false,error:"Catálogo no disponible"})),fetch("/api/products/google?code="+encodeURIComponent(value)).then(r=>r.json()).catch(()=>({results:[],note:"Google no disponible"}))]);let vision:any=null;if(!catalog.found&&!(google.results||[]).length&&frame){try{const r=await fetch("/api/products/identify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:frame})});vision=await r.json();if(!r.ok)vision={error:vision.error||"No se pudo analizar la imagen"};}catch{vision={error:"No se pudo conectar con el reconocimiento visual."};}}setReview({code:value,loading:false,catalog,google,vision});setStatus(catalog.found?"Producto encontrado. Revisa y confirma los datos en la ventana.":"Código leído. Revisa los resultados web en la ventana antes de confirmar.");}
  function handleScan(value:string){try{const v=video.current;if(v&&v.videoWidth){const canvas=document.createElement("canvas");const scale=Math.min(1,1024/Math.max(v.videoWidth,v.videoHeight));canvas.width=Math.round(v.videoWidth*scale);canvas.height=Math.round(v.videoHeight*scale);canvas.getContext("2d")?.drawImage(v,0,0,canvas.width,canvas.height);lastFrame.current=canvas.toDataURL("image/jpeg",.68);}}catch{lastFrame.current=""}stop();const raw=value.trim();const match=raw.match(/(?:^|[^0-9])([0-9]{8,14})(?:[^0-9]|$)/);if(/^[0-9]{8,14}$/.test(raw))void lookup(raw);else if(match)void lookup(match[1]);else{setCode(raw);setStatus("Código leído automáticamente: "+raw.slice(0,220)+". No contiene un UPC/EAN para consulta de catálogo. Puedes ingresar el nombre manualmente.");setTimeout(()=>detailsAnchor.current?.scrollIntoView({behavior:"smooth",block:"start"}),150)}}
  async function toggleTorch(){const s=video.current?.srcObject as MediaStream|null;const track=s?.getVideoTracks()[0];if(!track)return;try{const next=!torch;await track.applyConstraints({advanced:[{torch:next} as MediaTrackConstraintSet]});setTorch(next)}catch{setStatus("El flash no está disponible en esta cámara o navegador.")}}
- function stop(){startSequence.current++;if(nativeTimer.current)clearTimeout(nativeTimer.current);nativeTimer.current=null;scanBusy.current=false;setTorch(false);setTorchSupported(false);active.current=false;scannerControls.current?.stop();scannerControls.current=null;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(video.current)video.current.srcObject=null;}
+ function stop(){startSequence.current++;if(ocrTimer.current)clearTimeout(ocrTimer.current);ocrTimer.current=null;ocrBusy.current=false;ocrLast.current="";ocrRepeat.current=0;if(nativeTimer.current)clearTimeout(nativeTimer.current);nativeTimer.current=null;scanBusy.current=false;setTorch(false);setTorchSupported(false);active.current=false;scannerControls.current?.stop();scannerControls.current=null;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(video.current)video.current.srcObject=null;}
  async function start(){
   stop();const sequence=startSequence.current;setCameraError(false);
   if(!navigator.mediaDevices?.getUserMedia){setStatus("El navegador no permite cámara. Abre la página en Safari con HTTPS.");return;}
@@ -30,6 +30,32 @@ export default function ScanDemo(){
    const track=s.getVideoTracks()[0];
    const caps=track?.getCapabilities?.() as MediaTrackCapabilities & {torch?:boolean};
    setTorchSupported(Boolean(caps?.torch));active.current=true;scanBusy.current=false;
+   // OCR reads printed numbers when there are no readable UPC/EAN bars.
+   // Require two identical readings to reduce false positives.
+   const ocrPoll=async()=>{
+    if(sequence!==startSequence.current||!active.current||scanBusy.current)return;
+    if(!ocrBusy.current&&element.readyState>=2&&element.videoWidth){
+     ocrBusy.current=true;
+     try{
+      const canvas=document.createElement("canvas");
+      const scale=Math.min(1,900/Math.max(element.videoWidth,element.videoHeight));
+      canvas.width=Math.round(element.videoWidth*scale);canvas.height=Math.round(element.videoHeight*scale);
+      canvas.getContext("2d")?.drawImage(element,0,0,canvas.width,canvas.height);
+      const response=await fetch("/api/products/ocr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:canvas.toDataURL("image/jpeg",.65)})});
+      const result=await response.json();
+      if(sequence!==startSequence.current||!active.current)return;
+      if(result.code&&/^\d{8,14}$/.test(result.code)){
+       ocrRepeat.current=result.code===ocrLast.current?ocrRepeat.current+1:1;
+       ocrLast.current=result.code;
+       setScanDebug("OCR detectó "+result.code+" ("+ocrRepeat.current+"/2 verificaciones)");
+       if(ocrRepeat.current>=2){scanBusy.current=true;handleScan(result.code);return;}
+      }else{ocrRepeat.current=0;ocrLast.current="";}
+     }catch{/* Barcode decoding continues without OCR. */}
+     finally{ocrBusy.current=false;}
+    }
+    if(sequence===startSequence.current&&active.current&&!scanBusy.current)ocrTimer.current=setTimeout(()=>void ocrPoll(),4500);
+   };
+   ocrTimer.current=setTimeout(()=>void ocrPoll(),3500);
    // Run native barcode recognition alongside ZXing when supported.
    // Either engine can complete the same automatic lookup.
    const Native=(window as unknown as {BarcodeDetector?:{new(options:{formats:string[]}):{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string}>>};getSupportedFormats?:()=>Promise<string[]>}}).BarcodeDetector;
