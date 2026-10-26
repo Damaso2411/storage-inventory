@@ -13,7 +13,59 @@ export default function ScanDemo(){
  function handleScan(value:string){try{const v=video.current;if(v&&v.videoWidth){const canvas=document.createElement("canvas");const scale=Math.min(1,1024/Math.max(v.videoWidth,v.videoHeight));canvas.width=Math.round(v.videoWidth*scale);canvas.height=Math.round(v.videoHeight*scale);canvas.getContext("2d")?.drawImage(v,0,0,canvas.width,canvas.height);lastFrame.current=canvas.toDataURL("image/jpeg",.68);}}catch{lastFrame.current=""}stop();const raw=value.trim();const match=raw.match(/(?:^|[^0-9])([0-9]{8,14})(?:[^0-9]|$)/);if(/^[0-9]{8,14}$/.test(raw))void lookup(raw);else if(match)void lookup(match[1]);else{setCode(raw);setStatus("Código leído automáticamente: "+raw.slice(0,220)+". No contiene un UPC/EAN para consulta de catálogo. Puedes ingresar el nombre manualmente.");setTimeout(()=>detailsAnchor.current?.scrollIntoView({behavior:"smooth",block:"start"}),150)}}
  async function toggleTorch(){const s=video.current?.srcObject as MediaStream|null;const track=s?.getVideoTracks()[0];if(!track)return;try{const next=!torch;await track.applyConstraints({advanced:[{torch:next} as MediaTrackConstraintSet]});setTorch(next)}catch{setStatus("El flash no está disponible en esta cámara o navegador.")}}
  function stop(){if(nativeTimer.current)clearTimeout(nativeTimer.current);nativeTimer.current=null;scanBusy.current=false;setTorch(false);setTorchSupported(false);active.current=false;scannerControls.current?.stop();scannerControls.current=null;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(video.current)video.current.srcObject=null;}
- async function start(){stop();setCameraError(false);if(!navigator.mediaDevices?.getUserMedia){setStatus("El navegador no permite cámara. Usa Safari con HTTPS.");return;}setStatus("Abriendo cámara trasera...");try{const s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});stream.current=s;const element=video.current;if(!element){s.getTracks().forEach(t=>t.stop());return;}element.srcObject=s;element.setAttribute("playsinline","true");await element.play();const track=s.getVideoTracks()[0];const caps=track?.getCapabilities?.() as MediaTrackCapabilities & {torch?:boolean};setTorchSupported(Boolean(caps?.torch));active.current=true;scanBusy.current=false;const detectorConstructor=(window as unknown as {BarcodeDetector?:new(options:{formats:string[]})=>{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string;format:string}> >}}).BarcodeDetector;if(detectorConstructor){const formats=["qr_code","ean_13","ean_8","upc_a","upc_e","code_128","code_39","code_93","itf","codabar","data_matrix","pdf417"];const detector=new detectorConstructor({formats});setStatus("Escáner activo: leyendo UPC, EAN, QR y códigos de barras en vivo...");const poll=async()=>{if(!active.current||scanBusy.current)return;scanBusy.current=true;try{if(element.readyState>=2){const results=await detector.detect(element);if(results.length&&active.current){handleScan(results[0].rawValue);return;}}}catch(e){console.warn("BarcodeDetector",e instanceof Error?e.name:"error")}finally{scanBusy.current=false}if(active.current)nativeTimer.current=setTimeout(()=>void poll(),160)};void poll();}else{const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:150,delayBetweenScanSuccess:500});setStatus("Escáner activo (ZXing): leyendo UPC, EAN, QR y códigos de barras...");const controls=await reader.decodeFromStream(s,element,(result)=>{if(result&&active.current){handleScan(result.getText())}});scannerControls.current=controls;if(!active.current)controls.stop();}}catch(e){const msg=e instanceof Error?e.message:"Error desconocido";stop();setCameraError(true);setStatus("Error de cámara: "+msg+". Comprueba permisos y vuelve a intentar.");}}
+ async function start(){
+  stop();setCameraError(false);
+  if(!navigator.mediaDevices?.getUserMedia){setStatus("El navegador no permite cámara. Abre la página en Safari con HTTPS.");return;}
+  setStatus("Abriendo cámara trasera...");
+  try{
+   const s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
+   stream.current=s;
+   const element=video.current;
+   if(!element){s.getTracks().forEach(t=>t.stop());return;}
+   element.srcObject=s;element.setAttribute("playsinline","true");element.muted=true;
+   await element.play();
+   const track=s.getVideoTracks()[0];
+   const caps=track?.getCapabilities?.() as MediaTrackCapabilities & {torch?:boolean};
+   setTorchSupported(Boolean(caps?.torch));active.current=true;scanBusy.current=false;
+   const formats=["ean_13","ean_8","upc_a","upc_e","code_128","code_39","code_93","itf","qr_code"];
+   const Native=(window as unknown as {BarcodeDetector?:{new(options:{formats:string[]}):{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string;format:string}>>};getSupportedFormats?:()=>Promise<string[]>}}).BarcodeDetector;
+   let usingNative=false;
+   if(Native){
+    try{
+     const supported=typeof Native.getSupportedFormats==="function"?await Native.getSupportedFormats():formats;
+     const available=formats.filter(f=>supported.includes(f));
+     if(available.length){
+      const detector=new Native({formats:available});
+      usingNative=true;
+      setStatus("Cámara activa. Acerca el código de barras al centro y mantén el teléfono estable.");
+      let failures=0;
+      const poll=async()=>{
+       if(!active.current||scanBusy.current)return;
+       scanBusy.current=true;
+       try{
+        if(element.readyState>=2){
+         const results=await detector.detect(element);
+         if(results.length&&active.current){handleScan(results[0].rawValue);return;}
+        }
+       }catch(e){failures++;if(failures===5){usingNative=false;active.current=false;void start();return;}}
+       finally{scanBusy.current=false;}
+       if(active.current)nativeTimer.current=setTimeout(()=>void poll(),180);
+      };
+      void poll();
+     }
+    }catch{usingNative=false;}
+   }
+   if(!usingNative){
+    const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:100,delayBetweenScanSuccess:350});
+    setStatus("Escáner ZXing activo. Enfoca el código completo con buena luz.");
+    const controls=await reader.decodeFromStream(s,element,(result)=>{if(result&&active.current)handleScan(result.getText());});
+    scannerControls.current=controls;if(!active.current)controls.stop();
+   }
+  }catch(e){
+   const msg=e instanceof Error?e.message:"Error desconocido";
+   stop();setCameraError(true);setStatus("Error de cámara: "+msg+". Comprueba permisos y vuelve a intentar.");
+  }
+ }
  useEffect(()=>{if(mode==="photo")return;const timer=setTimeout(()=>{void start()},250);return()=>clearTimeout(timer)},[mode]);
  async function scanPhoto(file:File){setStatus("Leyendo código desde la fotografía...");try{const img=await new Promise<HTMLImageElement>((resolve,reject)=>{const el=new Image();const url=URL.createObjectURL(file);el.onload=()=>{URL.revokeObjectURL(url);resolve(el)};el.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("No se pudo abrir la imagen."))};el.src=url});const canvas=document.createElement("canvas");const scale=Math.min(1,1600/Math.max(img.width,img.height));canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext("2d")?.drawImage(img,0,0,canvas.width,canvas.height);const reader=new BrowserMultiFormatReader();const result=await reader.decodeFromImageUrl(canvas.toDataURL("image/png"));handleScan(result.getText())}catch{setStatus("No se detectó un código en la foto. Intenta acercarte, mejorar la luz o escribirlo manualmente.")}}
  async function analyzeMarket(){if(!name.trim()){setStatus("Identifica o escribe el nombre antes de analizar precios.");return;}setMarketBusy(true);setMarket(null);try{const params=new URLSearchParams({q:[brand,name].filter(Boolean).join(" "),condition,shipping,cost:purchaseCost});const response=await fetch("/api/market?"+params);const data=await response.json();if(!response.ok)throw new Error(data.error||"Error de mercado");setMarket(data);}catch(e){setStatus(e instanceof Error?e.message:"No se pudo consultar el mercado.");}finally{setMarketBusy(false)}}
