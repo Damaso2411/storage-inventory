@@ -56,7 +56,7 @@ struct ContentView: View {
                             })
                             .ignoresSafeArea(edges: .bottom)
                         } else {
-                            ContentUnavailableView("iOS no compatible", systemImage: "iphone.slash", description: Text("Se requiere iOS 16 o posterior."))
+                            Text("Se requiere iOS 16 o posterior.")
                         }
                     }
                     .toolbar {
