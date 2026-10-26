@@ -1,0 +1,4 @@
+"use client";
+import {useState} from "react";
+export default function Auctions(){const [list,setList]=useState<{name:string;total:number}[]>([]),[name,setName]=useState(""),[cost,setCost]=useState(""),[fees,setFees]=useState("");
+return <main style={{fontFamily:"system-ui",padding:30}}><a href="/">← Panel</a><h1>Subastas</h1><p>Demostración sin persistencia.</p><form onSubmit={e=>{e.preventDefault();if(name.trim())setList(v=>[...v,{name,total:(Number(cost)||0)+(Number(fees)||0)}]);setName("");setCost("");setFees("")}}><input required placeholder="Subasta" value={name} onChange={e=>setName(e.target.value)}/><input type="number" min="0" step="0.01" placeholder="Costo" value={cost} onChange={e=>setCost(e.target.value)}/><input type="number" min="0" step="0.01" placeholder="Gastos" value={fees} onChange={e=>setFees(e.target.value)}/><button>Agregar</button></form>{list.map((x,i)=><p key={i}>{x.name}: USD {x.total.toFixed(2)}</p>)}</main>}
