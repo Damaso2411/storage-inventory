@@ -1,3 +1,22 @@
 import {NextRequest,NextResponse} from "next/server";
 export const runtime="nodejs";
-export async function GET(req:NextRequest){const code=(req.nextUrl.searchParams.get("code")||"").trim();if(!/^[0-9]{8,14}$/.test(code))return NextResponse.json({error:"Código de 8 a 14 dígitos requerido."},{status:400});const key=process.env.GOOGLE_SEARCH_API_KEY,cx=process.env.GOOGLE_SEARCH_ENGINE_ID;const searchUrl="https://www.google.com/search?q="+encodeURIComponent(code);if(!key||!cx)return NextResponse.json({configured:false,results:[],searchUrl,note:"La búsqueda automática en Google requiere GOOGLE_SEARCH_API_KEY y GOOGLE_SEARCH_ENGINE_ID en Vercel. No es posible incrustar la página normal de Google dentro de la app."});try{const url=new URL("https://www.googleapis.com/customsearch/v1");url.searchParams.set("key",key);url.searchParams.set("cx",cx);url.searchParams.set("q",code);url.searchParams.set("num","5");const response=await fetch(url,{signal:AbortSignal.timeout(8500),cache:"no-store"});if(!response.ok)return NextResponse.json({configured:true,results:[],searchUrl,note:"Google Search API no respondió correctamente (HTTP "+response.status+"). Revisa cuota y configuración."});const data=await response.json();const results=(data.items||[]).map((x:{title?:string;snippet?:string;link?:string;displayLink?:string})=>({title:x.title||"",snippet:x.snippet||"",url:x.link||"",domain:x.displayLink||""})).filter((x:{url:string})=>/^https:\/\//.test(x.url));return NextResponse.json({configured:true,results,searchUrl,note:results.length?"Resultados reales de Google. Confirma que corresponden al código antes de aceptar.":"Google no devolvió coincidencias verificables."});}catch{return NextResponse.json({configured:true,results:[],searchUrl,note:"La consulta a Google falló o excedió el tiempo límite."});}}
+export const dynamic="force-dynamic";
+type Result={title:string;snippet:string;url:string;domain:string;image?:string};
+export async function GET(req:NextRequest){
+ const code=(req.nextUrl.searchParams.get("code")||"").trim();
+ if(!/^\d{8,14}$/.test(code))return NextResponse.json({error:"Código numérico de 8 a 14 dígitos requerido."},{status:400});
+ const searchUrl="https://www.google.com/search?q="+encodeURIComponent(code);
+ const key=process.env.SERPAPI_API_KEY||process.env.SERPAPI_KEY;
+ if(!key)return NextResponse.json({configured:false,results:[],searchUrl,note:"La búsqueda automática está preparada. Falta conectar SERPAPI_API_KEY en Vercel. Puedes abrir Google con el código exacto."});
+ try{
+  const url=new URL("https://serpapi.com/search.json");
+  url.searchParams.set("engine","google");url.searchParams.set("q",code);url.searchParams.set("gl","us");url.searchParams.set("hl","en");url.searchParams.set("num","8");url.searchParams.set("api_key",key);
+  const response=await fetch(url,{signal:AbortSignal.timeout(18000),cache:"no-store"});
+  if(!response.ok)return NextResponse.json({configured:true,results:[],searchUrl,note:"SerpAPI devolvió HTTP "+response.status+". Comprueba la clave y los límites del plan."});
+  const data=await response.json();
+  if(data.error)return NextResponse.json({configured:true,results:[],searchUrl,note:"SerpAPI: "+String(data.error).slice(0,180)});
+  const organic=Array.isArray(data.organic_results)?data.organic_results:[];
+  const results:Result[]=organic.slice(0,8).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||""})).filter((r:Result)=>/^https:\/\//.test(r.url));
+  return NextResponse.json({configured:true,results,searchUrl,note:results.length?"Resultados de Google vía SerpAPI. Comprueba que el producto corresponda al código antes de confirmar.":"Google no devolvió resultados para este código."});
+ }catch{return NextResponse.json({configured:true,results:[],searchUrl,note:"La búsqueda automática no respondió. Intenta nuevamente."});}
+}
