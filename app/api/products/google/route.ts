@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
-type Result={title:string;snippet:string;url:string;domain:string;image?:string};
+type Result={title:string;snippet:string;url:string;domain:string;image?:string;price?:string;sponsored?:boolean};
 export async function GET(req:NextRequest){
  const code=(req.nextUrl.searchParams.get("code")||"").trim();
  if(!/^\d{8,14}$/.test(code))return NextResponse.json({error:"Código numérico de 8 a 14 dígitos requerido."},{status:400});
@@ -16,14 +16,16 @@ export async function GET(req:NextRequest){
   const data=await response.json();
   if(data.error)return NextResponse.json({configured:true,results:[],searchUrl,note:"SerpAPI: "+String(data.error).slice(0,180)});
   const organic=Array.isArray(data.organic_results)?data.organic_results:[];
+  const ads=Array.isArray(data.ads)?data.ads:[];
+  const inlineShopping=Array.isArray(data.inline_shopping_results)?data.inline_shopping_results:[];
   const shopping=Array.isArray(data.shopping_results)?data.shopping_results:[];
   const knowledge=data.knowledge_graph&&typeof data.knowledge_graph==="object"?data.knowledge_graph:null;
   const excluded=/(?:orcid\.org|nii\.ac\.jp|researchgate\.net|scholar\.google|trademarks\.justia\.com|uspto\.gov|linkedin\.com|pubmed\.ncbi|wikipedia\.org|academia\.edu|patents\.google)/i;
   const retailer=/(?:amazon\.(?:com|ca)|ebay\.com|walmart\.com|target\.com|homedepot\.com|lowes\.com|bestbuy\.com|costco\.com|walgreens\.com|cvs\.com|etsy\.com|mercari\.com|shopify\.com)/i;
   const productWords=/\b(?:UPC|EAN|GTIN|barcode|product|item|model|pack|oz|ml|Vicks|VapoStick)\b/i;
   const latin=/^[\x00-\x7F\u00C0-\u024F\s\p{P}\p{N}\p{S}]*$/u;
-  const candidates=[...shopping.map((x:{title?:string;snippet?:string;link?:string;product_link?:string;source?:string;thumbnail?:string})=>({title:x.title||"",snippet:x.snippet||"",link:x.link||x.product_link||"",displayed_link:x.source||"",thumbnail:x.thumbnail||""})),...organic];
-  const results:Result[]=candidates.slice(0,25).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||""})).filter((r:Result)=>{
+  const candidates=[...ads.map((x:{title?:string;description?:string;link?:string;displayed_link?:string;thumbnail?:string;price?:string})=>({title:x.title||"",snippet:x.description||"",link:x.link||"",displayed_link:x.displayed_link||"",thumbnail:x.thumbnail||"",price:x.price||"",sponsored:true})),...[...shopping,...inlineShopping].map((x:{title?:string;snippet?:string;link?:string;product_link?:string;source?:string;thumbnail?:string})=>({title:x.title||"",snippet:x.snippet||"",link:x.link||x.product_link||"",displayed_link:x.source||"",thumbnail:x.thumbnail||"",price:(x as {price?:string}).price||"",sponsored:true})),...organic];
+  const results:Result[]=candidates.slice(0,25).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string;price?:string;sponsored?:boolean})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||"",price:r.price||"",sponsored:Boolean(r.sponsored)})).filter((r:Result)=>{
    if(!/^https:\/\//.test(r.url)||excluded.test(r.url)||!latin.test(r.title))return false;
    const content=r.title+" "+r.snippet;
    return content.includes(code)&&(retailer.test(r.url)||productWords.test(content));
