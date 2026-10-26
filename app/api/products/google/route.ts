@@ -5,12 +5,15 @@ type Result={title:string;snippet:string;url:string;domain:string;image?:string;
 export async function GET(req:NextRequest){
  const code=(req.nextUrl.searchParams.get("code")||"").trim();
  if(!/^\d{8,14}$/.test(code))return NextResponse.json({error:"Código numérico de 8 a 14 dígitos requerido."},{status:400});
- const searchUrl="https://www.google.com/search?q="+encodeURIComponent(code);
+ const suggestion=(req.nextUrl.searchParams.get("q")||"").trim().slice(0,120);
+ const visualQuery=Boolean(suggestion&&/[a-zA-Z]{3,}/.test(suggestion));
+ const query=visualQuery?suggestion:code;
+ const searchUrl="https://www.google.com/search?q="+encodeURIComponent(query);
  const key=process.env.SERPAPI_API_KEY||process.env.SERPAPI_KEY;
  if(!key)return NextResponse.json({configured:false,results:[],searchUrl,note:"La búsqueda automática está preparada. Falta conectar SERPAPI_API_KEY en Vercel. Puedes abrir Google con el código exacto."});
  try{
   const url=new URL("https://serpapi.com/search.json");
-  url.searchParams.set("engine","google");url.searchParams.set("q",code);url.searchParams.set("gl","us");url.searchParams.set("hl","en");url.searchParams.set("num","8");url.searchParams.set("google_domain","google.com");url.searchParams.set("api_key",key);
+  url.searchParams.set("engine","google");url.searchParams.set("q",query);url.searchParams.set("gl","us");url.searchParams.set("hl","en");url.searchParams.set("num","8");url.searchParams.set("google_domain","google.com");url.searchParams.set("api_key",key);
   const response=await fetch(url,{signal:AbortSignal.timeout(18000),cache:"no-store"});
   if(!response.ok)return NextResponse.json({configured:true,results:[],searchUrl,note:"SerpAPI devolvió HTTP "+response.status+". Comprueba la clave y los límites del plan."});
   const data=await response.json();
@@ -28,9 +31,9 @@ export async function GET(req:NextRequest){
   const results:Result[]=candidates.slice(0,25).map((r:{title?:string;snippet?:string;link?:string;displayed_link?:string;thumbnail?:string;price?:string;sponsored?:boolean})=>({title:r.title||"",snippet:r.snippet||"",url:r.link||"",domain:r.displayed_link||"",image:r.thumbnail||"",price:r.price||"",sponsored:Boolean(r.sponsored)})).filter((r:Result)=>{
    if(!/^https:\/\//.test(r.url)||excluded.test(r.url)||!latin.test(r.title))return false;
    const content=r.title+" "+r.snippet;
-   return content.includes(code)&&(retailer.test(r.url)||productWords.test(content));
+   return visualQuery?(retailer.test(r.url)||r.sponsored||productWords.test(content)):content.includes(code)&&(retailer.test(r.url)||productWords.test(content));
   });
   const productInfo=knowledge&&typeof knowledge.title==="string"&&knowledge.title.toLowerCase().includes(code)?{title:knowledge.title,description:knowledge.description||""}:null;
-  return NextResponse.json({configured:true,results,productInfo,searchUrl,note:results.length?"Posibles páginas de productos. El código por sí solo no verifica la identidad; confirma la marca y el envase.":"No se encontraron coincidencias comerciales confiables para este número. No se mostrarán personas, registros académicos ni marcas como productos."});
+  return NextResponse.json({configured:true,results,productInfo,searchUrl,visualSuggestion:visualQuery,note:results.length?visualQuery?"Sugerencias comerciales de Google basadas en la fotografía, no verificadas contra el código.":"Posibles páginas de productos. Confirma el código, la marca y el envase.":visualQuery?"No se encontraron productos para la descripción visual.":"No hay coincidencias comerciales verificables para el código; se puede intentar una búsqueda visual."});
  }catch{return NextResponse.json({configured:true,results:[],searchUrl,note:"La búsqueda automática no respondió. Intenta nuevamente."});}
 }
