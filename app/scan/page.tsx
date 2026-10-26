@@ -29,6 +29,31 @@ export default function ScanDemo(){
    const track=s.getVideoTracks()[0];
    const caps=track?.getCapabilities?.() as MediaTrackCapabilities & {torch?:boolean};
    setTorchSupported(Boolean(caps?.torch));active.current=true;scanBusy.current=false;
+   // Run native barcode recognition alongside ZXing when supported.
+   // Either engine can complete the same automatic lookup.
+   const Native=(window as unknown as {BarcodeDetector?:{new(options:{formats:string[]}):{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string}>>};getSupportedFormats?:()=>Promise<string[]>}}).BarcodeDetector;
+   if(Native){
+    try{
+     const supported=typeof Native.getSupportedFormats==="function"?await Native.getSupportedFormats():["ean_13","ean_8","upc_a","upc_e"];
+     const formats=["ean_13","ean_8","upc_a","upc_e","code_128","code_39"].filter(x=>supported.includes(x));
+     if(formats.length&&sequence===startSequence.current){
+      const detector=new Native({formats});
+      const poll=async()=>{
+       if(sequence!==startSequence.current||!active.current||scanBusy.current)return;
+       try{
+        if(element.readyState>=2){
+         const found=await detector.detect(element);
+         if(found.length&&sequence===startSequence.current&&active.current&&!scanBusy.current){
+          scanBusy.current=true;handleScan(found[0].rawValue);return;
+         }
+        }
+       }catch{/* Native decoder can fail on individual frames; ZXing remains active. */}
+       if(sequence===startSequence.current&&active.current&&!scanBusy.current)nativeTimer.current=setTimeout(()=>void poll(),250);
+      };
+      nativeTimer.current=setTimeout(()=>void poll(),300);
+     }
+    }catch{/* ZXing is the primary fallback. */}
+   }
    // ZXing decodes UPC/EAN directly from the live iPhone camera.
    // Prefer it over Safari's inconsistent BarcodeDetector implementation.
    const reader=new BrowserMultiFormatReader(undefined,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:600});
