@@ -11,7 +11,7 @@ export default function ScanDemo(){
  const [lookupLinks,setLookupLinks]=useState<{label:string;url:string}[]>([]),[status,setStatus]=useState("Listo para escanear"),[code,setCode]=useState(""),[name,setName]=useState(""),[brand,setBrand]=useState(""),[category,setCategory]=useState("General"),[qty,setQty]=useState("1"),[records,setRecords]=useState<Array<{code:string;name:string;sku:string;qty:number}>>([]);
  useEffect(()=>{try{setRecords(JSON.parse(localStorage.getItem("storage-scan-demo-v1")||"[]"))}catch{}return()=>{active.current=false;scannerControls.current?.stop();stream.current?.getTracks().forEach(t=>t.stop())}},[]);
  async function lookup(raw:string){const value=raw.trim();if(!/^[0-9]{8,14}$/.test(value)){setStatus("Código inválido: escribe entre 8 y 14 dígitos.");return;}setCode(value);const frame=lastFrame.current;lastFrame.current="";stop();setReview({code:value,loading:true,catalog:null,google:null});setStatus("Consultando catálogos y Google...");setLookupLinks([{label:"Buscar en Google",url:"https://www.google.com/search?q="+encodeURIComponent(value)},{label:"Buscar en eBay",url:"https://www.ebay.com/sch/i.html?_nkw="+encodeURIComponent(value)}]);const [catalog,google]=await Promise.all([fetch("/api/products/lookup?code="+encodeURIComponent(value)).then(r=>r.json()).catch(()=>({found:false,error:"Catálogo no disponible"})),fetch("/api/products/google?code="+encodeURIComponent(value)).then(r=>r.json()).catch(()=>({results:[],note:"Google no disponible"}))]);let vision:any=null;if(!catalog.found&&!(google.results||[]).length&&frame){try{const r=await fetch("/api/products/identify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:frame})});vision=await r.json();if(!r.ok)vision={error:vision.error||"No se pudo analizar la imagen"};}catch{vision={error:"No se pudo conectar con el reconocimiento visual."};}}setReview({code:value,loading:false,catalog,google,vision});setStatus(catalog.found?"Producto encontrado. Revisa y confirma los datos en la ventana.":"Código leído. Revisa los resultados web en la ventana antes de confirmar.");}
- function handleScan(value:string){try{const v=video.current;if(v&&v.videoWidth){const canvas=document.createElement("canvas");const scale=Math.min(1,1024/Math.max(v.videoWidth,v.videoHeight));canvas.width=Math.round(v.videoWidth*scale);canvas.height=Math.round(v.videoHeight*scale);canvas.getContext("2d")?.drawImage(v,0,0,canvas.width,canvas.height);lastFrame.current=canvas.toDataURL("image/jpeg",.68);}}catch{lastFrame.current=""}stop();const raw=value.trim();const match=raw.match(/(?:^|[^0-9])([0-9]{8,14})(?:[^0-9]|$)/);if(/^[0-9]{8,14}$/.test(raw))void lookup(raw);else if(match)void lookup(match[1]);else{setCode(raw);setStatus("Código leído automáticamente: "+raw.slice(0,220)+". No contiene un UPC/EAN para consulta de catálogo. Puedes ingresar el nombre manualmente.");setTimeout(()=>detailsAnchor.current?.scrollIntoView({behavior:"smooth",block:"start"}),150)}}
+ function handleScan(value:string){try{const v=video.current;if(v&&v.videoWidth){const canvas=document.createElement("canvas");const scale=Math.min(1,1024/Math.max(v.videoWidth,v.videoHeight));canvas.width=Math.round(v.videoWidth*scale);canvas.height=Math.round(v.videoHeight*scale);canvas.getContext("2d")?.drawImage(v,0,0,canvas.width,canvas.height);lastFrame.current=canvas.toDataURL("image/jpeg",.68);}}catch{lastFrame.current=""}stop();const raw=value.trim();const match=raw.match(/(?:^|[^0-9])([0-9]{8,14})(?:[^0-9]|$)/);if(/^[0-9]{8,14}$/.test(raw))void lookup(raw);else if(match)void lookup(match[1]);else{setCode(raw);setReview({code:raw,loading:false,catalog:null,google:{results:[],note:"Código QR leído. No contiene un identificador numérico de producto; verifica su contenido."}});setStatus("Código leído automáticamente: "+raw.slice(0,220)+". No contiene un UPC/EAN para consulta de catálogo. Puedes ingresar el nombre manualmente.");setTimeout(()=>detailsAnchor.current?.scrollIntoView({behavior:"smooth",block:"start"}),150)}}
  async function toggleTorch(){const s=video.current?.srcObject as MediaStream|null;const track=s?.getVideoTracks()[0];if(!track)return;try{const next=!torch;await track.applyConstraints({advanced:[{torch:next} as MediaTrackConstraintSet]});setTorch(next)}catch{setStatus("El flash no está disponible en esta cámara o navegador.")}}
  function stop(){startSequence.current++;if(ocrTimer.current)clearTimeout(ocrTimer.current);ocrTimer.current=null;ocrBusy.current=false;ocrLast.current="";ocrRepeat.current=0;if(nativeTimer.current)clearTimeout(nativeTimer.current);nativeTimer.current=null;scanBusy.current=false;setTorch(false);setTorchSupported(false);active.current=false;scannerControls.current?.stop();scannerControls.current=null;stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(video.current)video.current.srcObject=null;}
  async function start(){
@@ -38,31 +38,32 @@ export default function ScanDemo(){
      ocrBusy.current=true;
      try{
       const canvas=document.createElement("canvas");
-      const scale=Math.min(1,900/Math.max(element.videoWidth,element.videoHeight));
+      const scale=Math.min(1,1400/Math.max(element.videoWidth,element.videoHeight));
       canvas.width=Math.round(element.videoWidth*scale);canvas.height=Math.round(element.videoHeight*scale);
       canvas.getContext("2d")?.drawImage(element,0,0,canvas.width,canvas.height);
-      const response=await fetch("/api/products/ocr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:canvas.toDataURL("image/jpeg",.65)})});
+      const response=await fetch("/api/products/ocr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:canvas.toDataURL("image/jpeg",.82)})});
       const result=await response.json();
+      if(!response.ok){setScanDebug("OCR: "+(result.error||"HTTP "+response.status));}
       if(sequence!==startSequence.current||!active.current)return;
       if(result.code&&/^\d{8,14}$/.test(result.code)){
        ocrRepeat.current=result.code===ocrLast.current?ocrRepeat.current+1:1;
        ocrLast.current=result.code;
-       setScanDebug("OCR detectó "+result.code+" ("+ocrRepeat.current+"/2 verificaciones)");
-       if(ocrRepeat.current>=2){scanBusy.current=true;handleScan(result.code);return;}
+       setScanDebug("OCR detectó "+result.code+" ("+ocrRepeat.current+" lectura)");
+       if(ocrRepeat.current>=1){scanBusy.current=true;handleScan(result.code);return;}
       }else{ocrRepeat.current=0;ocrLast.current="";}
-     }catch{/* Barcode decoding continues without OCR. */}
+     }catch(e){if(sequence===startSequence.current&&active.current)setScanDebug("OCR: "+(e instanceof Error?e.message:"sin respuesta")+"; lector de barras activo");}
      finally{ocrBusy.current=false;}
     }
-    if(sequence===startSequence.current&&active.current&&!scanBusy.current)ocrTimer.current=setTimeout(()=>void ocrPoll(),4500);
+    if(sequence===startSequence.current&&active.current&&!scanBusy.current)ocrTimer.current=setTimeout(()=>void ocrPoll(),2200);
    };
-   ocrTimer.current=setTimeout(()=>void ocrPoll(),3500);
+   ocrTimer.current=setTimeout(()=>void ocrPoll(),1200);
    // Run native barcode recognition alongside ZXing when supported.
    // Either engine can complete the same automatic lookup.
    const Native=(window as unknown as {BarcodeDetector?:{new(options:{formats:string[]}):{detect:(source:HTMLVideoElement)=>Promise<Array<{rawValue:string}>>};getSupportedFormats?:()=>Promise<string[]>}}).BarcodeDetector;
    if(Native){
     try{
      const supported=typeof Native.getSupportedFormats==="function"?await Native.getSupportedFormats():["ean_13","ean_8","upc_a","upc_e"];
-     const formats=["ean_13","ean_8","upc_a","upc_e","code_128","code_39"].filter(x=>supported.includes(x));
+     const formats=["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code","data_matrix","pdf417"].filter(x=>supported.includes(x));
      if(formats.length&&sequence===startSequence.current){
       const detector=new Native({formats});
       const poll=async()=>{
@@ -84,7 +85,7 @@ export default function ScanDemo(){
    // ZXing decodes UPC/EAN directly from the live iPhone camera.
    // Prefer it over Safari's inconsistent BarcodeDetector implementation.
    const hints=new Map();
-   hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A,BarcodeFormat.UPC_E,BarcodeFormat.CODE_128,BarcodeFormat.CODE_39,BarcodeFormat.ITF]);
+   hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A,BarcodeFormat.UPC_E,BarcodeFormat.CODE_128,BarcodeFormat.CODE_39,BarcodeFormat.ITF,BarcodeFormat.QR_CODE,BarcodeFormat.DATA_MATRIX,BarcodeFormat.PDF_417]);
    hints.set(DecodeHintType.TRY_HARDER,true);
    const reader=new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:160,delayBetweenScanSuccess:600});
    let frames=0;
